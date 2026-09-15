@@ -1,0 +1,17 @@
+[
+  {
+    "alert_id": "ALRT-1001",
+    "description": "SIEM correlation rule fired: 47 failed logon events (Event ID 4625) for account 'svc_backup' from source IP 203.0.113.44 within a 3-minute window, followed by one successful logon (Event ID 4624, LogonType 3) from the same IP.",
+    "notes": "This matches the pattern for T1110 Brute Force followed by successful credential compromise (T1078 Valid Accounts). Recommended response: disable the account, rotate its credentials, and check what that account accessed after the successful logon."
+  },
+  {
+    "alert_id": "ALRT-1002",
+    "description": "Sysmon Event ID 1 on host FIN-WKS-07: parent process WINWORD.EXE spawned powershell.exe with command line containing '-EncodedCommand'.",
+    "notes": "Matches T1059 Command and Scripting Interpreter, likely delivered via a malicious macro. Recommended response: isolate host, decode the PowerShell payload, and check Sysmon Event ID 3 for any outbound connections from that PowerShell process."
+  },
+  {
+    "alert_id": "ALRT-1003",
+    "description": "Internal host 10.2.4.19 attempted TCP connections to 214 distinct destination IPs on port 445 over a 90-second period.",
+    "notes": "Matches T1046 Network Service Discovery (SMB scanning), often a precursor to lateral movement or worm-like propagation. Recommended response: isolate the scanning host and check for signs of compromise."
+  }
+]

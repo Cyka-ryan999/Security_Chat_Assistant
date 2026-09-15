@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - chroma_data:/app/chroma_db
+      - audit_data:/app/audit.db
+
+  frontend:
+    image: python:3.11-slim
+    working_dir: /site
+    volumes:
+      - ./frontend:/site
+    ports:
+      - "5500:5500"
+    command: python -m http.server 5500
+    depends_on:
+      - backend
+
+volumes:
+  chroma_data:
+  audit_data:
