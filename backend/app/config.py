@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 
+    # Groq — free tier, no credit card (https://console.groq.com)
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+
+    # Google AI Studio / Gemini — free tier, no credit card (https://aistudio.google.com)
+    google_api_key: str = ""
+    google_model: str = "gemini-2.0-flash"
+
     # Storage
     chroma_persist_dir: str = "./chroma_db"
     sqlite_db_path: str = "./audit.db"
