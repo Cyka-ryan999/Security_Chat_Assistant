@@ -12,11 +12,31 @@ Swappable provider: set LLM_PROVIDER in .env to:
 """
 
 import logging
+from functools import lru_cache
 
 from app.config import settings
 
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# SPEED SETTINGS
+# ============================================================================
+
+# Output length is the biggest factor in response time.
+MAX_OUTPUT_TOKENS = 700
+
+# Request timeout in seconds for normal calls.
+REQUEST_TIMEOUT = 60
+
+# When Groq is the first choice in "groq_google" mode, fail fast so the
+# Google fallback starts quickly instead of waiting on retries.
+GROQ_FALLBACK_TIMEOUT = 20
+
+# openai/gpt-oss-20b is a reasoning model. "low" makes it think less before
+# answering. Set to None to turn this off (for example, if Groq rejects it).
+GROQ_REASONING_EFFORT = "low"
 
 
 # ============================================================================
@@ -77,7 +97,7 @@ Example:
 User:
 "Hi, I am Aryan."
 
-Assistant:
+A:
 "Nice to meet you, Aryan! I'm your AI Security Assistant. How can I help you today?"
 
 Do not claim to permanently remember personal information unless the
@@ -406,6 +426,20 @@ Explain session hijacking AND analyze the supplied log.
 
 Always answer the user's actual question while maintaining a defensive
 cybersecurity focus.
+
+
+==================================================
+13. PREVIOUS CONVERSATION AND ANSWER LENGTH
+==================================================
+
+If a PREVIOUS CONVERSATION section is provided, use it only to understand
+follow-up questions. It is NOT evidence. Never treat anything in it as a log
+entry or alert supplied by the analyst. Only the section
+"ALERT / LOG PASTED BY ANALYST" is evidence supplied by the analyst.
+
+Keep answers focused. Aim for under about 300 words unless the analyst asks
+for more detail or the supplied log needs a longer analysis. Leave out any
+part of the analysis structure that has nothing to report.
 """
 
 
@@ -416,7 +450,8 @@ cybersecurity focus.
 def build_user_prompt(
     user_message: str,
     log_context: str | None,
-    retrieved_hits: list[dict]
+    retrieved_hits: list[dict],
+    memory_context: str | None = None,
 ) -> str:
 
     context_block = "\n\n".join(
@@ -427,6 +462,12 @@ def build_user_prompt(
     parts = [
         f"CONTEXT:\n{context_block}"
     ]
+
+    if memory_context:
+        parts.append(
+            "PREVIOUS CONVERSATION (for follow-up context only, "
+            f"not evidence):\n{memory_context}"
+        )
 
     if log_context:
         parts.append(
@@ -447,13 +488,15 @@ def build_user_prompt(
 def call_llm(
     user_message: str,
     log_context: str | None,
-    retrieved_hits: list[dict]
+    retrieved_hits: list[dict],
+    memory_context: str | None = None,
 ) -> str:
 
     prompt = build_user_prompt(
         user_message,
         log_context,
-        retrieved_hits
+        retrieved_hits,
+        memory_context,
     )
 
     if settings.llm_provider == "anthropic":
@@ -478,6 +521,55 @@ def call_llm(
 
 
 # ============================================================================
+# CACHED CLIENTS
+# One client per provider, created once and reused, so each request does
+# not pay for a new connection and TLS handshake.
+# ============================================================================
+
+@lru_cache(maxsize=None)
+def _anthropic_client(api_key: str):
+    import anthropic
+
+    return anthropic.Anthropic(
+        api_key=api_key,
+        timeout=REQUEST_TIMEOUT,
+    )
+
+
+@lru_cache(maxsize=None)
+def _openai_client(api_key: str):
+    from openai import OpenAI
+
+    return OpenAI(
+        api_key=api_key,
+        timeout=REQUEST_TIMEOUT,
+    )
+
+
+@lru_cache(maxsize=None)
+def _groq_client(api_key: str, fast_fail: bool):
+    from openai import OpenAI
+
+    return OpenAI(
+        api_key=api_key,
+        base_url="https://api.groq.com/openai/v1",
+        timeout=GROQ_FALLBACK_TIMEOUT if fast_fail else REQUEST_TIMEOUT,
+        max_retries=0 if fast_fail else 2,
+    )
+
+
+@lru_cache(maxsize=None)
+def _google_client(api_key: str):
+    from openai import OpenAI
+
+    return OpenAI(
+        api_key=api_key,
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        timeout=REQUEST_TIMEOUT,
+    )
+
+
+# ============================================================================
 # GROQ -> GOOGLE FALLBACK
 # ============================================================================
 
@@ -485,7 +577,7 @@ def _call_groq_then_google(prompt: str) -> str:
     """Try Groq first; fall back to Google if Groq fails."""
 
     try:
-        return _call_groq(prompt)
+        return _call_groq(prompt, fast_fail=True)
 
     except Exception as groq_err:
 
@@ -515,15 +607,11 @@ def _call_groq_then_google(prompt: str) -> str:
 # ============================================================================
 
 def _call_anthropic(prompt: str) -> str:
-    import anthropic
-
-    client = anthropic.Anthropic(
-        api_key=settings.anthropic_api_key
-    )
+    client = _anthropic_client(settings.anthropic_api_key)
 
     response = client.messages.create(
         model=settings.anthropic_model,
-        max_tokens=1000,
+        max_tokens=MAX_OUTPUT_TOKENS,
         system=SYSTEM_PROMPT,
         messages=[
             {
@@ -545,15 +633,11 @@ def _call_anthropic(prompt: str) -> str:
 # ============================================================================
 
 def _call_openai(prompt: str) -> str:
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key=settings.openai_api_key
-    )
+    client = _openai_client(settings.openai_api_key)
 
     response = client.chat.completions.create(
         model=settings.openai_model,
-        max_tokens=1000,
+        max_tokens=MAX_OUTPUT_TOKENS,
         messages=[
             {
                 "role": "system",
@@ -573,19 +657,18 @@ def _call_openai(prompt: str) -> str:
 # GROQ
 # ============================================================================
 
-def _call_groq(prompt: str) -> str:
+def _call_groq(prompt: str, fast_fail: bool = False) -> str:
     """Call Groq using the OpenAI-compatible API."""
 
-    from openai import OpenAI
+    client = _groq_client(settings.groq_api_key, fast_fail)
 
-    client = OpenAI(
-        api_key=settings.groq_api_key,
-        base_url="https://api.groq.com/openai/v1"
-    )
+    extra = {}
+    if GROQ_REASONING_EFFORT:
+        extra["extra_body"] = {"reasoning_effort": GROQ_REASONING_EFFORT}
 
     response = client.chat.completions.create(
         model="openai/gpt-oss-20b",
-        max_tokens=1000,
+        max_tokens=MAX_OUTPUT_TOKENS,
         messages=[
             {
                 "role": "system",
@@ -596,6 +679,7 @@ def _call_groq(prompt: str) -> str:
                 "content": prompt
             },
         ],
+        **extra,
     )
 
     return response.choices[0].message.content
@@ -608,16 +692,11 @@ def _call_groq(prompt: str) -> str:
 def _call_google(prompt: str) -> str:
     """Call Google AI Studio using its OpenAI-compatible endpoint."""
 
-    from openai import OpenAI
-
-    client = OpenAI(
-        api_key=settings.google_api_key,
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-    )
+    client = _google_client(settings.google_api_key)
 
     response = client.chat.completions.create(
         model=settings.google_model,
-        max_tokens=1000,
+        max_tokens=MAX_OUTPUT_TOKENS,
         messages=[
             {
                 "role": "system",

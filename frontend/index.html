@@ -3,113 +3,82 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>SIGNAL — Security Alert Assistant</title>
+<title>SIGNAL: Security Alert Assistant</title>
+<meta name="description" content="Ask about a security alert, log line, or term and get answers cited from a connected knowledge base." />
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700&family=DM+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
-
-<!-- ambient background ribbon, decorative only -->
-<svg class="bg-ribbon" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-  <defs>
-    <linearGradient id="ribbonGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#57D9C6"/>
-      <stop offset="45%" stop-color="#7C8CE0"/>
-      <stop offset="75%" stop-color="#E0955A"/>
-      <stop offset="100%" stop-color="#B48CE0"/>
-    </linearGradient>
-    <filter id="ribbonBlur" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="14"/>
-    </filter>
-  </defs>
-  <g class="ribbon-spin-1">
-    <path d="M -100 120 C 300 -40, 520 340, 900 120 S 1500 -80, 1750 220"
-          fill="none" stroke="url(#ribbonGrad)" stroke-width="46"
-          filter="url(#ribbonBlur)" opacity="0.4"/>
-  </g>
-  <g class="ribbon-spin-2">
-    <path d="M -150 880 C 250 720, 480 1040, 860 820 S 1420 620, 1760 900"
-          fill="none" stroke="url(#ribbonGrad)" stroke-width="40"
-          filter="url(#ribbonBlur)" opacity="0.32"/>
-  </g>
-</svg>
-
 <div class="console">
 
-  <header class="topbar">
-    <div class="brand">
-      <span class="dot" id="conn-dot"></span>
-      <span class="brand-name">SIGNAL</span>
-    </div>
-    <div class="topbar-meta mono">
-      <span class="muted">session</span>
-      <span id="session-id-display">—</span>
-    </div>
-    <div class="status-pill" id="status-pill">
-      <span class="mono" id="conn-status">checking backend…</span>
-    </div>
-  </header>
-
-  <div class="layout">
-
-    <aside class="rail">
-      <div class="rail-block">
-        <h3>Try asking</h3>
-        <div class="chip-list">
-          <button class="chip" data-q="What does Event ID 4625 mean?">What does Event ID 4625 mean?</button>
-          <button class="chip" data-q="Explain a port scan pattern in our logs.">Explain a port scan pattern</button>
-          <button class="chip" data-q="What's the difference between severity and confidence?">Severity vs. confidence?</button>
+  <div class="nav-wrap">
+    <header class="nav">
+      <a class="brand" href="index.html" aria-label="SIGNAL home">
+        <img src="favicon.svg" alt="" width="28" height="28">
+        <span class="brand-name">SIGNAL</span>
+      </a>
+      <nav class="nav-links" aria-label="Main">
+        <a href="index.html" class="active" aria-current="page">Assistant</a>
+        <a href="privacy.html">Privacy policy</a>
+        <a href="terms.html">Terms</a>
+      </nav>
+      <div class="nav-right">
+        <div class="status" id="status-pill">
+          <span class="dot" id="conn-dot"></span>
+          <span class="mono" id="conn-status">checking backend</span>
         </div>
+        <button type="button" class="btn-white" id="new-chat">New chat</button>
       </div>
-
-      <div class="rail-footer">
-        <p class="mono muted small">Answers are grounded in the connected knowledge base. This tool explains and triages — it does not generate offensive tooling.</p>
-      </div>
-    </aside>
-
-    <main class="chat-main">
-
-      <section class="hero" id="hero">
-        <p class="hero-eyebrow mono muted">security alert &amp; log assistant</p>
-        <h1 class="hero-title">Paste an alert.<br>Get context, not guesses.</h1>
-        <p class="hero-sub">SIGNAL explains terminology, indicators, and triage steps from your connected knowledge base — every exchange lands in the audit log.</p>
-        <button class="sample-card" id="sample-card" data-q="What does Event ID 4625 mean?">
-          <span class="sample-icon">◆</span>
-          <span class="sample-text">
-            <span class="sample-label mono muted">Example query</span>
-            <span class="sample-title">What does Event ID 4625 mean?</span>
-          </span>
-          <span class="sample-arrow">→</span>
-        </button>
-      </section>
-
-      <div class="transcript" id="transcript">
-        <div class="entry system">
-          <div class="entry-meta"><span class="tag">SYSTEM</span><span class="time">00:00:00</span></div>
-          <div class="entry-body">
-            Connected. Paste an alert or log line below, or ask a question about
-            terminology, indicators, or triage. Every exchange is written to the
-            audit log.
-          </div>
-        </div>
-      </div>
-
-      <form class="composer" id="composer">
-        <div class="log-context-wrap" id="log-context-wrap" hidden>
-          <textarea id="log-context" class="mono" placeholder="Paste the raw alert, log line, or event fields here…" rows="4"></textarea>
-        </div>
-        <div class="composer-bar">
-          <button type="button" id="toggle-log" class="attach-btn mono" title="Attach log/alert">+</button>
-          <textarea id="message" placeholder="Ask about an alert, log field, or technique…" rows="1"></textarea>
-          <button type="submit" id="send-btn">Send</button>
-        </div>
-      </form>
-
-    </main>
+    </header>
   </div>
-</div>
 
-<script src="app.js"></script>
+  <main class="stage" id="stage">
+
+    <section class="hero" id="hero">
+      <div class="globe"><canvas id="globe" aria-hidden="true"></canvas></div>
+      <h1 class="hero-title">Ask about an alert, a log line, or a term</h1>
+      <p class="hero-sub">Paste an alert or log line, or ask about a term, indicator, or triage step. Answers come from the connected knowledge base and list the sources they used. Every exchange is written to the audit log.</p>
+      <div class="cards">
+        <button class="card chip" data-q="What does Event ID 4625 mean?">
+          <span class="card-title">Windows events</span>
+          <span class="card-text">What does Event ID 4625 mean?</span>
+        </button>
+        <button class="card chip" data-q="Explain a port scan pattern in our logs.">
+          <span class="card-title">Network activity</span>
+          <span class="card-text">Explain a port scan pattern in our logs.</span>
+        </button>
+        <button class="card chip" data-q="What's the difference between severity and confidence?">
+          <span class="card-title">Triage</span>
+          <span class="card-text">What's the difference between severity and confidence?</span>
+        </button>
+      </div>
+    </section>
+
+    <div class="transcript" id="transcript" aria-live="polite"></div>
+
+  </main>
+
+  <div class="dock">
+    <form class="composer" id="composer">
+      <div class="log-context-wrap" id="log-context-wrap" hidden>
+        <textarea id="log-context" class="mono" placeholder="Paste the raw alert, log line, or event fields here" rows="4" aria-label="Alert or log text"></textarea>
+      </div>
+      <div class="composer-bar">
+        <button type="button" id="toggle-log" class="btn-ghost" aria-controls="log-context-wrap">Attach log</button>
+        <textarea id="message" placeholder="Ask about an alert, log field, or technique" rows="1" aria-label="Message"></textarea>
+        <button type="submit" id="send-btn" class="btn-white">Send</button>
+      </div>
+    </form>
+    <p class="foot">
+      <span>Answers are grounded in the connected knowledge base. This tool explains and triages. It does not generate offensive tooling.</span>
+      <span class="mono">session <span id="session-id-display"></span></span>
+    </p>
+  </div>
+
+</div>
+<script src="app.js?v=3"></script>
 </body>
 </html>

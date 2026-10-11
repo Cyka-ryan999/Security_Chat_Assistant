@@ -1,3 +1,4 @@
+import logging
 import time
 
 from fastapi import APIRouter, Depends
@@ -14,11 +15,28 @@ from app.validation import check_input, check_output, is_grounded
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+# "uvicorn.error" is shown at INFO level by default, so the timing lines
+# appear in the terminal without extra logging setup.
+logger = logging.getLogger("uvicorn.error")
+
+# How much earlier conversation is sent to the LLM. Every extra exchange
+# adds prompt tokens to every request, which makes each answer slower.
+HISTORY_LIMIT = 3
+HISTORY_USER_CHARS = 500
+HISTORY_ASSISTANT_CHARS = 600
+
+
+def lap(label: str, since: float) -> float:
+    """Log how long a stage took and return the new reference time."""
+    now = time.perf_counter()
+    logger.info("chat timing: %s %.2fs", label, now - since)
+    return now
+
 
 def get_conversation_history(
     db: Session,
     session_id: str,
-    limit: int = 10,
+    limit: int = HISTORY_LIMIT,
 ) -> list[dict]:
     """
     Retrieve previous messages and AI responses from the same chat session.
@@ -29,6 +47,7 @@ def get_conversation_history(
     - assistant_response
 
     Therefore we can reuse it as short-term conversation memory.
+    Long messages are trimmed so the prompt does not grow with every turn.
     """
 
     previous_logs = (
@@ -47,8 +66,8 @@ def get_conversation_history(
     for log in previous_logs:
         history.append(
             {
-                "user": log.user_message,
-                "assistant": log.assistant_response,
+                "user": (log.user_message or "")[:HISTORY_USER_CHARS],
+                "assistant": (log.assistant_response or "")[:HISTORY_ASSISTANT_CHARS],
             }
         )
 
@@ -78,6 +97,7 @@ def build_memory_context(history: list[dict]) -> str:
 @router.post("", response_model=ChatResponse)
 def chat(request: ChatRequest, db: Session = Depends(get_db)):
     start = time.perf_counter()
+    t = start
 
     # ---------------------------------------------------------
     # 1. Retrieve previous conversation from the same session
@@ -86,10 +106,11 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     conversation_history = get_conversation_history(
         db=db,
         session_id=request.session_id,
-        limit=10,
+        limit=HISTORY_LIMIT,
     )
 
     memory_context = build_memory_context(conversation_history)
+    t = lap("history", t)
 
     # ---------------------------------------------------------
     # 2. Input validation
@@ -107,6 +128,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
     )
 
     grounded = is_grounded(retrieved_hits)
+    t = lap("retrieval", t)
 
     # ---------------------------------------------------------
     # 4. Generate response
@@ -125,36 +147,16 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
 
     else:
 
-        # -----------------------------------------------------
-        # Combine previous conversation + current log
-        # -----------------------------------------------------
-
-        combined_log_context = ""
-
-        if memory_context:
-            combined_log_context += (
-                "PREVIOUS CONVERSATION MEMORY:\n"
-                f"{memory_context}\n\n"
-            )
-
-        if request.log_context:
-            combined_log_context += (
-                "CURRENT USER-PROVIDED LOG / ALERT:\n"
-                f"{request.log_context}"
-            )
-
-        if not combined_log_context:
-            combined_log_context = None
-
-        # -----------------------------------------------------
-        # Send everything to the LLM
-        # -----------------------------------------------------
-
+        # The analyst's pasted log and the conversation memory are passed
+        # separately, so the model never mistakes its own earlier answers
+        # for evidence supplied by the analyst.
         answer = call_llm(
             request.message,
-            combined_log_context,
+            request.log_context or None,
             retrieved_hits,
+            memory_context=memory_context or None,
         )
+        t = lap("llm", t)
 
         # -----------------------------------------------------
         # 5. Output validation
@@ -187,6 +189,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         ),
         latency_ms=latency_ms,
     )
+    t = lap("audit write", t)
 
     # ---------------------------------------------------------
     # 7. Citations
@@ -200,6 +203,8 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
         )
         for h in retrieved_hits
     ]
+
+    logger.info("chat timing: total %.2fs", time.perf_counter() - start)
 
     # ---------------------------------------------------------
     # 8. Return response
