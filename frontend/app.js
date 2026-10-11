@@ -21,6 +21,8 @@ const newChatBtn = document.getElementById("new-chat");
 const connDot = document.getElementById("conn-dot");
 const connStatus = document.getElementById("conn-status");
 const sessionDisplay = document.getElementById("session-id-display");
+const navTrigger = document.getElementById("nav-trigger");
+const navPanel = document.getElementById("nav-panel");
 
 sessionDisplay.textContent = sessionId;
 
@@ -37,7 +39,28 @@ function timeNow() {
   return new Date().toLocaleTimeString("en-GB", { hour12: false });
 }
 
-function addEntry({ role, text, citations = [], flagged = false, flagReason = "", grounded = true, logAttachment = "" }) {
+// Greetings, thanks, and "who are you" style messages have nothing to look up in the
+// knowledge base, so a low confidence warning on their replies is misleading.
+// Only a message that is entirely small talk matches. A real question never does.
+const SMALL_TALK = [
+  /^(hi+|hello+|hey+|heya|hiya|yo|namaste|good (morning|afternoon|evening|night))( there| assistant| bot| everyone)?$/,
+  /^(how are you|how are you doing|how r u|how are u|how are you doing today|how do you do|how is it going|how's it going|what's up|whats up|sup)( today)?$/,
+  /^(who are you|what are you|what is your name|what's your name|whats your name|who made you|who built you|who created you|introduce yourself|tell me about yourself)$/,
+  /^(what can you do|what do you do|how can you help( me)?|can you help me|what can you help( me)? with|help|help me)$/,
+  /^(thanks|thank you|thx|ok|okay|cool|great|nice|got it|bye|goodbye|see you)( so much| a lot| very much)?$/
+];
+
+function isSmallTalk(message, logContext) {
+  if (logContext) return false;
+  const clean = message.toLowerCase().replace(/[^a-z0-9'\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (!clean) return false;
+  if (SMALL_TALK.some(re => re.test(clean))) return true;
+  // "hi how are you", "hello who are you": a greeting followed by small talk
+  const rest = clean.replace(/^(hi+|hello+|hey+|heya|hiya|yo|good (morning|afternoon|evening)) /, "");
+  return rest !== clean && SMALL_TALK.some(re => re.test(rest));
+}
+
+function addEntry({ role, text, citations = [], flagged = false, flagReason = "", grounded = true, logAttachment = "", warnLowConfidence = true }) {
   const entry = document.createElement("div");
   entry.className = `entry ${role}`;
 
@@ -66,14 +89,26 @@ function addEntry({ role, text, citations = [], flagged = false, flagReason = ""
     entry.appendChild(badge);
   }
 
+  // Warn when the backend says the answer was not grounded in the knowledge base.
+  // Whether a message counts as grounded is decided by the backend (app/validation.py).
+  const ungrounded = role === "assistant" && grounded === false;
+  if (ungrounded && warnLowConfidence) {
+    const badge = document.createElement("span");
+    badge.className = "entry-ungrounded";
+    badge.textContent = "Low confidence: limited supporting context found";
+    badge.title = "The knowledge base had little to support this answer. Check it before acting on it.";
+    entry.appendChild(badge);
+  }
+
   // Only show sources when the answer was actually grounded in them.
-  if (citations.length && grounded) {
+  const sources = Array.isArray(citations) ? citations : [];
+  if (sources.length && !ungrounded) {
     const wrap = document.createElement("div");
     wrap.className = "citations";
-    citations.forEach(c => {
+    sources.forEach(c => {
       const chip = document.createElement("span");
       chip.className = "citation";
-      chip.title = c.snippet;
+      chip.title = c.snippet || "";
       chip.textContent = `[${c.source}]`;
       wrap.appendChild(chip);
     });
@@ -149,6 +184,7 @@ async function sendMessage(message, logContext) {
       flagged: data.flagged,
       flagReason: data.flag_reason,
       grounded: data.grounded,
+      warnLowConfidence: !isSmallTalk(message, logContext),
     });
   } catch (err) {
     loader.remove();
@@ -175,6 +211,30 @@ function newChat() {
   toggleLogBtn.textContent = "Attach log";
   stage.scrollTop = 0;
 }
+
+// ---- Navigation menu ----
+function setPanel(open) {
+  navPanel.hidden = !open;
+  navTrigger.setAttribute("aria-expanded", String(open));
+}
+
+navTrigger.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setPanel(navPanel.hidden);
+});
+
+document.addEventListener("click", (e) => {
+  if (!navPanel.hidden && !navPanel.contains(e.target) && !navTrigger.contains(e.target)) {
+    setPanel(false);
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !navPanel.hidden) {
+    setPanel(false);
+    navTrigger.focus();
+  }
+});
 
 // ---- Event wiring ----
 newChatBtn.addEventListener("click", newChat);
